@@ -2,6 +2,8 @@ server:
   port: ${SERVER_PORT:8090}
 
 spring:
+  config:
+    import: optional:file:.env[.properties]
   application:
     name: regula-control-plane-backend
   datasource:
