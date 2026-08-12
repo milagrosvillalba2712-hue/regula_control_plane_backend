@@ -2,11 +2,14 @@ package com.regula.controlplane.api;
 
 import com.regula.controlplane.domain.*;
 import com.regula.controlplane.repo.*;
+import com.regula.controlplane.service.LeaseSigningService;
+import com.regula.controlplane.service.LeaseTokenResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -19,17 +22,20 @@ public class ControlPlaneController {
     private final SuscripcionClienteRepository suscripciones;
     private final InstalacionClienteRepository instalaciones;
     private final CatalogoVersionRepository catalogos;
+    private final LeaseSigningService leaseSigningService;
 
     public ControlPlaneController(EmpresaClienteRepository empresas,
                                   PlanComercialRepository planes,
                                   SuscripcionClienteRepository suscripciones,
                                   InstalacionClienteRepository instalaciones,
-                                  CatalogoVersionRepository catalogos) {
+                                  CatalogoVersionRepository catalogos,
+                                  LeaseSigningService leaseSigningService) {
         this.empresas = empresas;
         this.planes = planes;
         this.suscripciones = suscripciones;
         this.instalaciones = instalaciones;
         this.catalogos = catalogos;
+        this.leaseSigningService = leaseSigningService;
     }
 
     @PostMapping("/api/v1/licencias/validar")
@@ -39,16 +45,37 @@ public class ControlPlaneController {
         SuscripcionCliente suscripcion = instalacion != null
                 ? suscripciones.findTopByEmpresaIdOrderByFechaFinDesc(instalacion.getEmpresa().getId()).orElse(null)
                 : null;
-        PlanComercial plan = suscripcion != null ? suscripcion.getPlan() : planes.findByCodigo("ESTANDAR").orElse(null);
-        return ResponseEntity.ok(Map.of(
-                "instalacionId", instalacionId != null ? instalacionId : "desconocida",
-                "estado", suscripcion != null ? suscripcion.getEstado() : "VALIDO_DEMO",
-                "plan", plan != null ? plan.getCodigo() : "ESTANDAR",
-                "leaseRenewalAvailable", true,
-                "vence", suscripcion != null ? suscripcion.getFechaFin().toString() : OffsetDateTime.now(ZoneOffset.UTC).plusDays(15).toString(),
-                "graceUntil", suscripcion != null ? suscripcion.getGraceUntil().toString() : OffsetDateTime.now(ZoneOffset.UTC).plusDays(30).toString(),
-                "mensaje", "Validacion central demo recibida"
-        ));
+        if (instalacion == null || suscripcion == null) {
+            PlanComercial plan = planes.findByCodigo("ESTANDAR").orElse(null);
+            return ResponseEntity.ok(Map.of(
+                    "instalacionId", instalacionId != null ? instalacionId : "desconocida",
+                    "estado", "VALIDO_DEMO",
+                    "plan", plan != null ? plan.getCodigo() : "ESTANDAR",
+                    "leaseRenewalAvailable", false,
+                    "vence", OffsetDateTime.now(ZoneOffset.UTC).plusDays(15).toString(),
+                    "graceUntil", OffsetDateTime.now(ZoneOffset.UTC).plusDays(30).toString(),
+                    "mensaje", "Instalacion no encontrada; respuesta demo sin lease firmado"
+            ));
+        }
+        LeaseTokenResponse lease = leaseSigningService.issueLease(instalacion, suscripcion);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("instalacionId", instalacion.getId());
+        response.put("estado", suscripcion.getEstado());
+        response.put("plan", suscripcion.getPlan().getCodigo());
+        response.put("leaseRenewalAvailable", true);
+        response.put("vence", lease.venceEn().toString());
+        response.put("graceUntil", lease.graceUntil().toString());
+        response.put("kid", lease.kid());
+        response.put("algoritmo", lease.algoritmo());
+        response.put("leaseToken", lease.leaseToken());
+        response.put("leasePayload", lease.payload());
+        response.put("mensaje", "Lease firmado emitido por Control Plane");
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/api/v1/licencias/jwks")
+    public ResponseEntity<Map<String, Object>> jwks() {
+        return ResponseEntity.ok(leaseSigningService.jwks());
     }
 
     @PostMapping("/api/v1/telemetry/heartbeat")
