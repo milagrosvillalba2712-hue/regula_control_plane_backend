@@ -1,0 +1,18 @@
+server:
+  port: ${SERVER_PORT:8090}
+
+spring:
+  application:
+    name: regula-control-plane-backend
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+regula:
+  control-plane:
+    admin-api-key: ${REGULA_CONTROL_PLANE_ADMIN_KEY:change-me-admin}
+    client-api-key: ${REGULA_CONTROL_PLANE_CLIENT_KEY:change-me-client}
+
