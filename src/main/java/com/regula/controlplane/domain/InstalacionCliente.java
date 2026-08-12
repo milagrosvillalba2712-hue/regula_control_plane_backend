@@ -33,5 +33,5 @@ public class InstalacionCliente {
     public String getVersionProducto() { return versionProducto; }
     public String getEstado() { return estado; }
     public OffsetDateTime getUltimoHeartbeatEn() { return ultimoHeartbeatEn; }
+    public void setUltimoHeartbeatEn(OffsetDateTime ultimoHeartbeatEn) { this.ultimoHeartbeatEn = ultimoHeartbeatEn; }
 }
-

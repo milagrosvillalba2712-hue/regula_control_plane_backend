@@ -4,6 +4,8 @@ import com.regula.controlplane.domain.*;
 import com.regula.controlplane.repo.*;
 import com.regula.controlplane.service.LeaseSigningService;
 import com.regula.controlplane.service.LeaseTokenResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,19 +25,28 @@ public class ControlPlaneController {
     private final InstalacionClienteRepository instalaciones;
     private final CatalogoVersionRepository catalogos;
     private final LeaseSigningService leaseSigningService;
+    private final HeartbeatInstalacionRepository heartbeats;
+    private final ConsumoReportadoRepository consumos;
+    private final ObjectMapper objectMapper;
 
     public ControlPlaneController(EmpresaClienteRepository empresas,
                                   PlanComercialRepository planes,
                                   SuscripcionClienteRepository suscripciones,
                                   InstalacionClienteRepository instalaciones,
                                   CatalogoVersionRepository catalogos,
-                                  LeaseSigningService leaseSigningService) {
+                                  LeaseSigningService leaseSigningService,
+                                  HeartbeatInstalacionRepository heartbeats,
+                                  ConsumoReportadoRepository consumos,
+                                  ObjectMapper objectMapper) {
         this.empresas = empresas;
         this.planes = planes;
         this.suscripciones = suscripciones;
         this.instalaciones = instalaciones;
         this.catalogos = catalogos;
         this.leaseSigningService = leaseSigningService;
+        this.heartbeats = heartbeats;
+        this.consumos = consumos;
+        this.objectMapper = objectMapper;
     }
 
     @PostMapping("/api/v1/licencias/validar")
@@ -79,21 +90,51 @@ public class ControlPlaneController {
     }
 
     @PostMapping("/api/v1/telemetry/heartbeat")
-    public ResponseEntity<Map<String, Object>> heartbeat(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<Map<String, Object>> heartbeat(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        UUID instalacionId = parseUuid(body.get("instalacionId"));
+        InstalacionCliente instalacion = instalacionId != null ? instalaciones.findById(instalacionId).orElse(null) : null;
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (instalacion != null) {
+            HeartbeatInstalacion heartbeat = new HeartbeatInstalacion();
+            heartbeat.setInstalacion(instalacion);
+            heartbeat.setEstadoReportado(String.valueOf(body.getOrDefault("estado", "OPERATIVA")));
+            heartbeat.setVersionProducto(String.valueOf(body.getOrDefault("versionProducto", instalacion.getVersionProducto())));
+            heartbeat.setIpOrigen(clientIp(request));
+            heartbeat.setFechaEvento(now);
+            heartbeats.save(heartbeat);
+            instalacion.setUltimoHeartbeatEn(now);
+            instalaciones.save(instalacion);
+        }
         return ResponseEntity.ok(Map.of(
                 "instalacionId", body.getOrDefault("instalacionId", "desconocida"),
-                "estado", "OPERATIVA",
-                "serverTime", OffsetDateTime.now(ZoneOffset.UTC).toString(),
+                "estado", instalacion != null ? "OPERATIVA" : "INSTALACION_DESCONOCIDA",
+                "serverTime", now.toString(),
                 "leaseRenewalAvailable", true
         ));
     }
 
     @PostMapping("/api/v1/telemetry/usage")
     public ResponseEntity<Map<String, Object>> usage(@RequestBody Map<String, Object> body) {
+        UUID instalacionId = parseUuid(body.get("instalacionId"));
+        InstalacionCliente instalacion = instalacionId != null ? instalaciones.findById(instalacionId).orElse(null) : null;
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (instalacion != null) {
+            ConsumoReportado consumo = new ConsumoReportado();
+            consumo.setInstalacion(instalacion);
+            consumo.setPeriodo(String.valueOf(body.getOrDefault("periodo", now.getYear() + "-" + String.format("%02d", now.getMonthValue()))));
+            consumo.setUsuariosActivos(intValue(body.get("usuariosActivos")));
+            consumo.setTransacciones(longValue(body.get("transaccionesProcesadas"), body.get("transacciones")));
+            consumo.setConsultasKyc(longValue(body.get("consultasKyc"), body.get("consultas_kyc")));
+            consumo.setReportes(longValue(body.get("reportesGenerados"), body.get("reportes")));
+            consumo.setReglas(intValue(body.get("reglas")));
+            consumo.setPayloadJson(safeJson(body));
+            consumo.setFechaEvento(now);
+            consumos.save(consumo);
+        }
         return ResponseEntity.ok(Map.of(
                 "instalacionId", body.getOrDefault("instalacionId", "desconocida"),
-                "estado", "RECIBIDO",
-                "serverTime", OffsetDateTime.now(ZoneOffset.UTC).toString()
+                "estado", instalacion != null ? "RECIBIDO" : "INSTALACION_DESCONOCIDA",
+                "serverTime", now.toString()
         ));
     }
 
@@ -182,5 +223,42 @@ public class ControlPlaneController {
         } catch (IllegalArgumentException ex) {
             return null;
         }
+    }
+
+    private String safeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            return "{}";
+        }
+    }
+
+    private Integer intValue(Object value) {
+        if (value instanceof Number number) return number.intValue();
+        if (value == null) return 0;
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    private Long longValue(Object primary, Object fallback) {
+        Object value = primary != null ? primary : fallback;
+        if (value instanceof Number number) return number.longValue();
+        if (value == null) return 0L;
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return 0L;
+        }
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }
