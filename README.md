@@ -7,6 +7,8 @@ Backend central para administrar licencias, instalaciones, heartbeats, consumo a
 - API Key obligatoria por `X-API-Key`.
 - Endpoints de licencia, heartbeat, uso, catálogos y configuración.
 - Endpoints admin de empresas, planes e instalaciones.
+- Emisión de lease firmado RS256 y publicación JWKS.
+- Persistencia de heartbeat y consumo agregado sanitizado.
 - Persistencia PostgreSQL con Flyway.
 - Seed demo de `Financiera Santa Clara`.
 
@@ -40,6 +42,7 @@ APP_LICENSES_CONTROL_PLANE_API_KEY=<REGULA_CONTROL_PLANE_CLIENT_KEY>
 ## Endpoints Principales
 
 - `POST /api/v1/licencias/validar`
+- `GET /api/v1/licencias/jwks`
 - `POST /api/v1/telemetry/heartbeat`
 - `POST /api/v1/telemetry/usage`
 - `GET /api/v1/catalogs/manifest`
@@ -51,7 +54,8 @@ APP_LICENSES_CONTROL_PLANE_API_KEY=<REGULA_CONTROL_PLANE_CLIENT_KEY>
 
 ## Siguiente Fase
 
-- Firma RSA/ECC real del lease.
 - Registro CRUD de empresas, contratos, pagos e instalaciones.
 - Revocación de instalaciones.
+- Rotación formal de claves RSA/ECC.
+- Archivo offline `.lic`.
 - Auditoría central completa.
