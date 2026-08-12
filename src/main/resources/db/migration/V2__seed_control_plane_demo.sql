@@ -25,6 +25,12 @@ INSERT INTO instalacion_cliente (id, empresa_id, identificador_instalacion, fing
 VALUES ('00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000000001', 'FIN-SANTA-CLARA-ONPREM-01', repeat('a', 64), '2026.08-demo', 'OPERATIVA', now() - interval '10 days', now() - interval '3 minutes')
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO instalacion_cliente (id, empresa_id, identificador_instalacion, fingerprint_hash, version_producto, estado, activada_en, ultimo_heartbeat_en)
+VALUES ('00000000-0000-0000-0000-000000009001', '00000000-0000-0000-0000-000000000001', 'SCL-ASUNCION-01', 'sha256:demo-fingerprint-no-productivo', '1.0.0', 'OPERATIVA', now() - interval '10 days', now() - interval '3 minutes')
+ON CONFLICT (id) DO UPDATE SET fingerprint_hash = EXCLUDED.fingerprint_hash,
+    version_producto = EXCLUDED.version_producto,
+    estado = EXCLUDED.estado;
+
 INSERT INTO lease_emitido (instalacion_id, suscripcion_id, estado, plan_codigo, emitido_en, vence_en, grace_until, kid, nonce, lease_payload, firma)
 SELECT '00000000-0000-0000-0000-000000000101', s.id, 'VIGENTE', 'ESTANDAR', now() - interval '1 day', now() + interval '15 days', now() + interval '30 days', 'demo-rsa-2026-01', gen_random_uuid(),
        '{"iss":"regula-control-plane","plan":"ESTANDAR","demo":true}'::jsonb,
@@ -46,4 +52,3 @@ SELECT id, '2026.08.01', 'sha256-demo-' || lower(codigo),
        jsonb_build_array(jsonb_build_object('codigo', codigo || '_001', 'estado', 'ACTIVO'))
 FROM catalogo_publicado
 ON CONFLICT (catalogo_id, version) DO NOTHING;
-
