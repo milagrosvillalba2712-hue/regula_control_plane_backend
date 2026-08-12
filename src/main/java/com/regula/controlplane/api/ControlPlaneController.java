@@ -1,5 +1,7 @@
 package com.regula.controlplane.api;
 
+import com.regula.controlplane.domain.*;
+import com.regula.controlplane.repo.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,16 +14,39 @@ import java.util.UUID;
 @RestController
 public class ControlPlaneController {
 
+    private final EmpresaClienteRepository empresas;
+    private final PlanComercialRepository planes;
+    private final SuscripcionClienteRepository suscripciones;
+    private final InstalacionClienteRepository instalaciones;
+    private final CatalogoVersionRepository catalogos;
+
+    public ControlPlaneController(EmpresaClienteRepository empresas,
+                                  PlanComercialRepository planes,
+                                  SuscripcionClienteRepository suscripciones,
+                                  InstalacionClienteRepository instalaciones,
+                                  CatalogoVersionRepository catalogos) {
+        this.empresas = empresas;
+        this.planes = planes;
+        this.suscripciones = suscripciones;
+        this.instalaciones = instalaciones;
+        this.catalogos = catalogos;
+    }
+
     @PostMapping("/api/v1/licencias/validar")
     public ResponseEntity<Map<String, Object>> validarLicencia(@RequestBody Map<String, Object> body) {
-        String instalacionId = String.valueOf(body.getOrDefault("instalacionId", UUID.randomUUID().toString()));
+        UUID instalacionId = parseUuid(body.get("instalacionId"));
+        InstalacionCliente instalacion = instalacionId != null ? instalaciones.findById(instalacionId).orElse(null) : null;
+        SuscripcionCliente suscripcion = instalacion != null
+                ? suscripciones.findTopByEmpresaIdOrderByFechaFinDesc(instalacion.getEmpresa().getId()).orElse(null)
+                : null;
+        PlanComercial plan = suscripcion != null ? suscripcion.getPlan() : planes.findByCodigo("ESTANDAR").orElse(null);
         return ResponseEntity.ok(Map.of(
-                "instalacionId", instalacionId,
-                "estado", "VALIDO",
-                "plan", "ESTANDAR",
+                "instalacionId", instalacionId != null ? instalacionId : "desconocida",
+                "estado", suscripcion != null ? suscripcion.getEstado() : "VALIDO_DEMO",
+                "plan", plan != null ? plan.getCodigo() : "ESTANDAR",
                 "leaseRenewalAvailable", true,
-                "vence", OffsetDateTime.now(ZoneOffset.UTC).plusDays(15).toString(),
-                "graceUntil", OffsetDateTime.now(ZoneOffset.UTC).plusDays(30).toString(),
+                "vence", suscripcion != null ? suscripcion.getFechaFin().toString() : OffsetDateTime.now(ZoneOffset.UTC).plusDays(15).toString(),
+                "graceUntil", suscripcion != null ? suscripcion.getGraceUntil().toString() : OffsetDateTime.now(ZoneOffset.UTC).plusDays(30).toString(),
                 "mensaje", "Validacion central demo recibida"
         ));
     }
@@ -50,71 +75,85 @@ public class ControlPlaneController {
         return ResponseEntity.ok(Map.of(
                 "packageVersion", "2026.08-control-plane-demo",
                 "generatedAt", OffsetDateTime.now(ZoneOffset.UTC).toString(),
-                "catalogs", List.of(
-                        catalog("PAISES_ISO", "2026.08.01", "sha256-demo-paises"),
-                        catalog("MONEDAS_ISO", "2026.08.01", "sha256-demo-monedas"),
-                        catalog("PAISES_RIESGO", "2026.08.01", "sha256-demo-riesgo"),
-                        catalog("LISTAS_RIESGO_DEMO", "2026.08.01", "sha256-demo-listas")
-                )
+                "catalogs", catalogos.findByActivoTrueOrderByCatalogoCodigoAsc().stream().map(this::catalog).toList()
         ));
     }
 
     @GetMapping("/api/v1/catalogs/{code}/versions/{version}")
     public ResponseEntity<Map<String, Object>> catalogVersion(@PathVariable String code, @PathVariable String version) {
+        CatalogoVersion catalogo = catalogos.findFirstByCatalogoCodigoAndVersionAndActivoTrue(code, version)
+                .orElseThrow(() -> new IllegalArgumentException("Catalogo no encontrado"));
         return ResponseEntity.ok(Map.of(
                 "code", code,
                 "version", version,
-                "hash", "sha256-demo-" + code.toLowerCase(),
-                "items", List.of(
-                        Map.of("codigo", code + "_001", "descripcion", "Item demo publicado por Regula", "estado", "ACTIVO"),
-                        Map.of("codigo", code + "_002", "descripcion", "Item demo de prueba academica", "estado", "ACTIVO")
-                )
+                "hash", catalogo.getSha256(),
+                "itemsJson", catalogo.getItemsJson()
         ));
     }
 
     @GetMapping("/api/v1/configuration/package")
     public ResponseEntity<Map<String, Object>> configurationPackage() {
+        PlanComercial plan = planes.findByCodigo("ESTANDAR").orElse(null);
         return ResponseEntity.ok(Map.of(
-                "plan", "ESTANDAR",
-                "modules", List.of("TRANSACCIONES", "ALERTAS", "KYC", "REGLAS", "REPORTES"),
-                "limits", Map.of("users", 50, "transactionsMonth", 250000, "kycMonth", 10000, "reportsMonth", 1000, "rules", 40),
+                "plan", plan != null ? plan.getCodigo() : "ESTANDAR",
+                "modules", plan != null ? plan.getModulosJson() : "[]",
+                "limits", Map.of(
+                        "users", plan != null ? plan.getLimiteUsuarios() : 50,
+                        "transactionsMonth", plan != null ? plan.getLimiteTransaccionesMes() : 250000,
+                        "kycMonth", plan != null ? plan.getLimiteKycMes() : 10000,
+                        "reportsMonth", plan != null ? plan.getLimiteReportesMes() : 1000,
+                        "rules", plan != null ? plan.getLimiteReglas() : 40),
                 "jobs", Map.of("heartbeatCron", "0 */15 * * * *", "usageSyncCron", "0 5 * * * *", "catalogSyncCron", "0 0 2 * * *")
         ));
     }
 
     @GetMapping("/api/admin/companies")
     public ResponseEntity<List<Map<String, Object>>> companies() {
-        return ResponseEntity.ok(List.of(Map.of(
-                "id", "00000000-0000-0000-0000-000000000001",
-                "codigo", "FIN-SANTA-CLARA",
-                "nombre", "Financiera Santa Clara",
-                "estado", "ACTIVA",
-                "plan", "ESTANDAR"
-        )));
+        return ResponseEntity.ok(empresas.findAll().stream().map(this::company).toList());
     }
 
     @GetMapping("/api/admin/installations")
     public ResponseEntity<List<Map<String, Object>>> installations() {
-        return ResponseEntity.ok(List.of(Map.of(
-                "id", "demo-installation-001",
-                "empresa", "Financiera Santa Clara",
-                "estado", "OPERATIVA",
-                "ultimoHeartbeat", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(3).toString()
-        )));
+        return ResponseEntity.ok(instalaciones.findAll().stream().map(this::installation).toList());
     }
 
     @GetMapping("/api/admin/plans")
     public ResponseEntity<List<Map<String, Object>>> plans() {
-        return ResponseEntity.ok(List.of(
-                Map.of("codigo", "BASICO", "nombre", "Basico", "users", 10, "transactionsMonth", 50000),
-                Map.of("codigo", "ESTANDAR", "nombre", "Estandar", "users", 50, "transactionsMonth", 250000),
-                Map.of("codigo", "PREMIUM", "nombre", "Premium", "users", 200, "transactionsMonth", 1000000)
-        ));
+        return ResponseEntity.ok(planes.findAll().stream().map(this::plan).toList());
     }
 
-    private Map<String, Object> catalog(String code, String version, String hash) {
-        return Map.of("code", code, "version", version, "sha256", hash,
-                "downloadUrl", "/api/v1/catalogs/" + code + "/versions/" + version);
+    private Map<String, Object> catalog(CatalogoVersion version) {
+        String code = version.getCatalogo().getCodigo();
+        return Map.of("code", code, "version", version.getVersion(), "sha256", version.getSha256(),
+                "downloadUrl", "/api/v1/catalogs/" + code + "/versions/" + version.getVersion());
+    }
+
+    private Map<String, Object> company(EmpresaCliente e) {
+        return Map.of("id", e.getId(), "codigo", e.getCodigo(), "nombre", e.getNombre(),
+                "ruc", e.getRuc() != null ? e.getRuc() : "", "emailContacto", e.getEmailContacto() != null ? e.getEmailContacto() : "",
+                "estado", e.getEstado());
+    }
+
+    private Map<String, Object> installation(InstalacionCliente i) {
+        return Map.of("id", i.getId(), "empresa", i.getEmpresa().getNombre(),
+                "identificadorInstalacion", i.getIdentificadorInstalacion(), "estado", i.getEstado(),
+                "versionProducto", i.getVersionProducto() != null ? i.getVersionProducto() : "",
+                "ultimoHeartbeat", i.getUltimoHeartbeatEn() != null ? i.getUltimoHeartbeatEn().toString() : "");
+    }
+
+    private Map<String, Object> plan(PlanComercial p) {
+        return Map.of("id", p.getId(), "codigo", p.getCodigo(), "nombre", p.getNombre(),
+                "users", p.getLimiteUsuarios(), "transactionsMonth", p.getLimiteTransaccionesMes(),
+                "kycMonth", p.getLimiteKycMes(), "reportsMonth", p.getLimiteReportesMes(),
+                "rules", p.getLimiteReglas(), "precioAnual", p.getPrecioAnual(), "activo", p.getActivo());
+    }
+
+    private UUID parseUuid(Object value) {
+        if (value == null) return null;
+        try {
+            return UUID.fromString(String.valueOf(value));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 }
-
