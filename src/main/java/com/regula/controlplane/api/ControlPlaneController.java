@@ -2,10 +2,14 @@ package com.regula.controlplane.api;
 
 import com.regula.controlplane.domain.*;
 import com.regula.controlplane.repo.*;
+import com.regula.controlplane.service.ApiEventoControlPlaneService;
 import com.regula.controlplane.service.LeaseSigningService;
 import com.regula.controlplane.service.LeaseTokenResponse;
+import com.regula.controlplane.service.SystemOverviewService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -29,7 +33,12 @@ public class ControlPlaneController {
     private final LeaseSigningService leaseSigningService;
     private final HeartbeatInstalacionRepository heartbeats;
     private final ConsumoReportadoRepository consumos;
+    private final SystemOverviewService systemOverviewService;
+    private final ApiEventoControlPlaneService apiEventoService;
     private final ObjectMapper objectMapper;
+    private final String adminEmail;
+    private final String adminPassword;
+    private final String adminSessionToken;
 
     public ControlPlaneController(EmpresaClienteRepository empresas,
                                   PlanComercialRepository planes,
@@ -39,7 +48,12 @@ public class ControlPlaneController {
                                   LeaseSigningService leaseSigningService,
                                   HeartbeatInstalacionRepository heartbeats,
                                   ConsumoReportadoRepository consumos,
-                                  ObjectMapper objectMapper) {
+                                  SystemOverviewService systemOverviewService,
+                                  ApiEventoControlPlaneService apiEventoService,
+                                  ObjectMapper objectMapper,
+                                  @Value("${regula.control-plane.admin-email}") String adminEmail,
+                                  @Value("${regula.control-plane.admin-password}") String adminPassword,
+                                  @Value("${regula.control-plane.admin-session-token}") String adminSessionToken) {
         this.empresas = empresas;
         this.planes = planes;
         this.suscripciones = suscripciones;
@@ -48,11 +62,38 @@ public class ControlPlaneController {
         this.leaseSigningService = leaseSigningService;
         this.heartbeats = heartbeats;
         this.consumos = consumos;
+        this.systemOverviewService = systemOverviewService;
+        this.apiEventoService = apiEventoService;
         this.objectMapper = objectMapper;
+        this.adminEmail = adminEmail;
+        this.adminPassword = adminPassword;
+        this.adminSessionToken = adminSessionToken;
+    }
+
+    @PostMapping("/api/admin/login")
+    public ResponseEntity<Map<String, Object>> login(@RequestBody Map<String, Object> body) {
+        String email = String.valueOf(body.getOrDefault("email", ""));
+        String password = String.valueOf(body.getOrDefault("password", ""));
+        if (!adminEmail.equalsIgnoreCase(email) || !adminPassword.equals(password)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "codigo", "CONTROL_PLANE_LOGIN_INVALIDO",
+                    "mensaje", "Credenciales invalidas para el Control Plane"
+            ));
+        }
+        return ResponseEntity.ok(Map.of(
+                "token", adminSessionToken,
+                "usuario", Map.of(
+                        "email", adminEmail,
+                        "nombre", "Administrador General Regula",
+                        "rol", "ADMIN_GENERAL_CONTROL_PLANE"
+                ),
+                "permisos", List.of("EMPRESAS_VER", "PLANES_VER", "LICENCIAS_VER", "TELEMETRIA_VER", "CATALOGOS_VER")
+        ));
     }
 
     @PostMapping("/api/v1/licencias/validar")
     public ResponseEntity<Map<String, Object>> validarLicencia(@RequestBody Map<String, Object> body) {
+        long start = System.nanoTime();
         UUID instalacionId = parseUuid(body.get("instalacionId"));
         InstalacionCliente instalacion = instalacionId != null ? instalaciones.findById(instalacionId).orElse(null) : null;
         SuscripcionCliente suscripcion = instalacion != null
@@ -60,6 +101,10 @@ public class ControlPlaneController {
                 : null;
         if (instalacion == null || suscripcion == null) {
             PlanComercial plan = planes.findByCodigo("ESTANDAR").orElse(null);
+            apiEventoService.registrarCliente(null, instalacionId, "LICENCIAS", "/api/v1/licencias/validar",
+                    "POST", 200, elapsed(start), "INSTALACION_DESCONOCIDA",
+                    "Validacion demo sin instalacion asociada", true, null,
+                    "{\"modo\":\"VALIDO_DEMO\"}");
             return ResponseEntity.ok(Map.of(
                     "instalacionId", instalacionId != null ? instalacionId : "desconocida",
                     "estado", "VALIDO_DEMO",
@@ -83,6 +128,9 @@ public class ControlPlaneController {
         response.put("leaseToken", lease.leaseToken());
         response.put("leasePayload", lease.payload());
         response.put("mensaje", "Lease firmado emitido por Control Plane");
+        apiEventoService.registrarCliente(instalacion.getEmpresa().getId(), instalacion.getId(), "LICENCIAS",
+                "/api/v1/licencias/validar", "POST", 200, elapsed(start), null,
+                "Lease firmado emitido", true, null, "{\"estado\":\"" + suscripcion.getEstado() + "\"}");
         return ResponseEntity.ok(response);
     }
 
@@ -93,6 +141,7 @@ public class ControlPlaneController {
 
     @PostMapping("/api/v1/telemetry/heartbeat")
     public ResponseEntity<Map<String, Object>> heartbeat(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        long start = System.nanoTime();
         UUID instalacionId = parseUuid(body.get("instalacionId"));
         InstalacionCliente instalacion = instalacionId != null ? instalaciones.findById(instalacionId).orElse(null) : null;
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -107,6 +156,11 @@ public class ControlPlaneController {
             instalacion.setUltimoHeartbeatEn(now);
             instalaciones.save(instalacion);
         }
+        apiEventoService.registrarCliente(instalacion != null ? instalacion.getEmpresa().getId() : null,
+                instalacionId, "HEARTBEAT", "/api/v1/telemetry/heartbeat", "POST", 200, elapsed(start),
+                instalacion != null ? null : "INSTALACION_DESCONOCIDA",
+                instalacion != null ? "Heartbeat recibido" : "Heartbeat sin instalacion asociada",
+                true, null, "{\"estado\":\"" + (instalacion != null ? "OPERATIVA" : "INSTALACION_DESCONOCIDA") + "\"}");
         return ResponseEntity.ok(Map.of(
                 "instalacionId", body.getOrDefault("instalacionId", "desconocida"),
                 "estado", instalacion != null ? "OPERATIVA" : "INSTALACION_DESCONOCIDA",
@@ -117,6 +171,7 @@ public class ControlPlaneController {
 
     @PostMapping("/api/v1/telemetry/usage")
     public ResponseEntity<Map<String, Object>> usage(@RequestBody Map<String, Object> body) {
+        long start = System.nanoTime();
         UUID instalacionId = parseUuid(body.get("instalacionId"));
         InstalacionCliente instalacion = instalacionId != null ? instalaciones.findById(instalacionId).orElse(null) : null;
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -133,6 +188,11 @@ public class ControlPlaneController {
             consumo.setFechaEvento(now);
             consumos.save(consumo);
         }
+        apiEventoService.registrarCliente(instalacion != null ? instalacion.getEmpresa().getId() : null,
+                instalacionId, "CONSUMO", "/api/v1/telemetry/usage", "POST", 200, elapsed(start),
+                instalacion != null ? null : "INSTALACION_DESCONOCIDA",
+                instalacion != null ? "Consumo recibido" : "Consumo sin instalacion asociada",
+                true, null, "{\"periodo\":\"" + String.valueOf(body.getOrDefault("periodo", "")) + "\"}");
         return ResponseEntity.ok(Map.of(
                 "instalacionId", body.getOrDefault("instalacionId", "desconocida"),
                 "estado", instalacion != null ? "RECIBIDO" : "INSTALACION_DESCONOCIDA",
@@ -190,6 +250,11 @@ public class ControlPlaneController {
     @GetMapping("/api/admin/plans")
     public ResponseEntity<List<Map<String, Object>>> plans() {
         return ResponseEntity.ok(planes.findAll().stream().map(this::plan).toList());
+    }
+
+    @GetMapping("/api/admin/system-overview")
+    public ResponseEntity<Map<String, Object>> systemOverview() {
+        return ResponseEntity.ok(systemOverviewService.overview());
     }
 
     private Map<String, Object> catalog(CatalogoVersion version) {
@@ -254,6 +319,10 @@ public class ControlPlaneController {
         } catch (NumberFormatException ex) {
             return 0L;
         }
+    }
+
+    private long elapsed(long start) {
+        return (System.nanoTime() - start) / 1_000_000;
     }
 
     private String clientIp(HttpServletRequest request) {

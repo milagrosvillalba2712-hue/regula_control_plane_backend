@@ -31,3 +31,6 @@ regula:
   control-plane:
     admin-api-key: ${REGULA_CONTROL_PLANE_ADMIN_KEY:change-me-admin}
     client-api-key: ${REGULA_CONTROL_PLANE_CLIENT_KEY:change-me-client}
+    admin-email: ${REGULA_CONTROL_PLANE_ADMIN_EMAIL:admin@regula.local}
+    admin-password: ${REGULA_CONTROL_PLANE_ADMIN_PASSWORD:RegulaControl2026!}
+    admin-session-token: ${REGULA_CONTROL_PLANE_ADMIN_SESSION_TOKEN:demo-control-plane-session-token}
