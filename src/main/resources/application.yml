@@ -2,8 +2,24 @@ server:
   port: ${SERVER_PORT:8090}
 
 spring:
+  config:
+    import: optional:file:.env[.properties]
   application:
     name: regula-control-plane-backend
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:regula_control_plane}
+    username: ${DB_USER:regula_owner}
+    password: ${DB_PASSWORD:regula}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
 
 management:
   endpoints:
@@ -15,4 +31,6 @@ regula:
   control-plane:
     admin-api-key: ${REGULA_CONTROL_PLANE_ADMIN_KEY:change-me-admin}
     client-api-key: ${REGULA_CONTROL_PLANE_CLIENT_KEY:change-me-client}
-
+    admin-email: ${REGULA_CONTROL_PLANE_ADMIN_EMAIL:admin@regula.local}
+    admin-password: ${REGULA_CONTROL_PLANE_ADMIN_PASSWORD:RegulaControl2026!}
+    admin-session-token: ${REGULA_CONTROL_PLANE_ADMIN_SESSION_TOKEN:demo-control-plane-session-token}
