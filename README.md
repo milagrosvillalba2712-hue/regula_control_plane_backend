@@ -35,8 +35,8 @@ REGULA_CONTROL_PLANE_CLIENT_KEY=...
 Para conectar el cliente on-premise (`sistema_antifraude_backend`) a este Control Plane:
 
 ```text
-APP_LICENSES_CONTROL_PLANE_URL=http://localhost:8090
-APP_LICENSES_CONTROL_PLANE_API_KEY=<REGULA_CONTROL_PLANE_CLIENT_KEY>
+LICENSES_CONTROL_PLANE_URL=http://localhost:8090
+LICENSES_CONTROL_PLANE_API_KEY=<REGULA_CONTROL_PLANE_CLIENT_KEY>
 ```
 
 ## Endpoints Principales
