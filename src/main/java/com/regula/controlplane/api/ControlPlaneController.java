@@ -3,6 +3,7 @@ package com.regula.controlplane.api;
 import com.regula.controlplane.domain.*;
 import com.regula.controlplane.repo.*;
 import com.regula.controlplane.service.ApiEventoControlPlaneService;
+import com.regula.controlplane.service.BackendProxyService;
 import com.regula.controlplane.service.LeaseSigningService;
 import com.regula.controlplane.service.LeaseTokenResponse;
 import com.regula.controlplane.service.SystemOverviewService;
@@ -37,6 +38,7 @@ public class ControlPlaneController {
     private final SystemOverviewService systemOverviewService;
     private final ApiEventoControlPlaneService apiEventoService;
     private final ObjectMapper objectMapper;
+    private final BackendProxyService backendProxyService;
     private final String adminEmail;
     private final String adminPassword;
     private final String adminSessionToken;
@@ -52,6 +54,7 @@ public class ControlPlaneController {
                                   DocumentoLegalRepository documentoLegalRepository,
                                   SystemOverviewService systemOverviewService,
                                   ApiEventoControlPlaneService apiEventoService,
+                                  BackendProxyService backendProxyService,
                                   ObjectMapper objectMapper,
                                   @Value("${regula.control-plane.admin-email}") String adminEmail,
                                   @Value("${regula.control-plane.admin-password}") String adminPassword,
@@ -67,6 +70,7 @@ public class ControlPlaneController {
         this.documentoLegalRepository = documentoLegalRepository;
         this.systemOverviewService = systemOverviewService;
         this.apiEventoService = apiEventoService;
+        this.backendProxyService = backendProxyService;
         this.objectMapper = objectMapper;
         this.adminEmail = adminEmail;
         this.adminPassword = adminPassword;
@@ -355,6 +359,40 @@ public class ControlPlaneController {
         List<Map<String, Object>> result = documentoLegalRepository.findByActivoTrueOrderByTipoAscVersionDesc()
                 .stream().map(this::documentoLegalToMap).toList();
         return ResponseEntity.ok(result);
+    }
+
+    // ─── Proxy a Backend Antifraude: Usuarios, Invitaciones, Solicitudes de Roles ───
+
+    @GetMapping("/api/admin/backend/usuarios")
+    public ResponseEntity<?> proxyUsuarios(@RequestParam(required = false) String empresaId) {
+        String path = "/api/admin/users";
+        if (empresaId != null && !empresaId.isBlank()) {
+            path += "?empresaId=" + empresaId;
+        }
+        return ResponseEntity.ok(backendProxyService.get(path, null));
+    }
+
+    @GetMapping("/api/admin/backend/invitaciones")
+    public ResponseEntity<?> proxyInvitaciones(@RequestParam(required = false) String empresaId) {
+        String path = "/api/licensing/invitaciones";
+        if (empresaId != null && !empresaId.isBlank()) {
+            path += "?empresaId=" + empresaId;
+        }
+        return ResponseEntity.ok(backendProxyService.get(path, null));
+    }
+
+    @GetMapping("/api/admin/backend/solicitud-roles")
+    public ResponseEntity<?> proxySolicitudesRoles(@RequestParam(required = false) String empresaId) {
+        String path = "/api/licensing/solicitud-roles";
+        if (empresaId != null && !empresaId.isBlank()) {
+            path += "?empresaId=" + empresaId;
+        }
+        return ResponseEntity.ok(backendProxyService.get(path, null));
+    }
+
+    @GetMapping("/api/admin/backend/limites")
+    public ResponseEntity<?> proxyLimites(@RequestParam String empresaId) {
+        return ResponseEntity.ok(backendProxyService.get("/api/licensing/limites?empresaId=" + empresaId, null));
     }
 
     private Map<String, Object> documentoLegalToMap(DocumentoLegal d) {
