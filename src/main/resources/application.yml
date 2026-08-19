@@ -34,3 +34,5 @@ regula:
     admin-email: ${REGULA_CONTROL_PLANE_ADMIN_EMAIL:admin@regula.local}
     admin-password: ${REGULA_CONTROL_PLANE_ADMIN_PASSWORD:RegulaControl2026!}
     admin-session-token: ${REGULA_CONTROL_PLANE_ADMIN_SESSION_TOKEN:demo-control-plane-session-token}
+  backend:
+    url: ${ANTIFRAUDE_BACKEND_URL:http://localhost:8080}
