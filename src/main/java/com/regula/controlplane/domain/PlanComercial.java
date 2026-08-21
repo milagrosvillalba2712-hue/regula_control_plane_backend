@@ -24,6 +24,10 @@ public class PlanComercial {
     private Integer limiteReglas;
     @Column(name = "precio_anual")
     private BigDecimal precioAnual;
+    @Column(name = "stripe_product_id")
+    private String stripeProductId;
+    @Column(name = "stripe_price_id")
+    private String stripePriceId;
     @Column(name = "modulos_json", columnDefinition = "jsonb")
     private String modulosJson;
     private Boolean activo;
@@ -37,7 +41,8 @@ public class PlanComercial {
     public Long getLimiteReportesMes() { return limiteReportesMes; }
     public Integer getLimiteReglas() { return limiteReglas; }
     public BigDecimal getPrecioAnual() { return precioAnual; }
+    public String getStripeProductId() { return stripeProductId; }
+    public String getStripePriceId() { return stripePriceId; }
     public String getModulosJson() { return modulosJson; }
     public Boolean getActivo() { return activo; }
 }
-

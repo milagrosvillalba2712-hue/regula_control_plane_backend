@@ -3,6 +3,7 @@ package com.regula.controlplane.api;
 import com.regula.controlplane.domain.*;
 import com.regula.controlplane.repo.*;
 import com.regula.controlplane.service.ApiEventoControlPlaneService;
+import com.regula.controlplane.service.BackendProxyService;
 import com.regula.controlplane.service.LeaseSigningService;
 import com.regula.controlplane.service.LeaseTokenResponse;
 import com.regula.controlplane.service.SystemOverviewService;
@@ -33,9 +34,11 @@ public class ControlPlaneController {
     private final LeaseSigningService leaseSigningService;
     private final HeartbeatInstalacionRepository heartbeats;
     private final ConsumoReportadoRepository consumos;
+    private final DocumentoLegalRepository documentoLegalRepository;
     private final SystemOverviewService systemOverviewService;
     private final ApiEventoControlPlaneService apiEventoService;
     private final ObjectMapper objectMapper;
+    private final BackendProxyService backendProxyService;
     private final String adminEmail;
     private final String adminPassword;
     private final String adminSessionToken;
@@ -48,8 +51,10 @@ public class ControlPlaneController {
                                   LeaseSigningService leaseSigningService,
                                   HeartbeatInstalacionRepository heartbeats,
                                   ConsumoReportadoRepository consumos,
+                                  DocumentoLegalRepository documentoLegalRepository,
                                   SystemOverviewService systemOverviewService,
                                   ApiEventoControlPlaneService apiEventoService,
+                                  BackendProxyService backendProxyService,
                                   ObjectMapper objectMapper,
                                   @Value("${regula.control-plane.admin-email}") String adminEmail,
                                   @Value("${regula.control-plane.admin-password}") String adminPassword,
@@ -62,8 +67,10 @@ public class ControlPlaneController {
         this.leaseSigningService = leaseSigningService;
         this.heartbeats = heartbeats;
         this.consumos = consumos;
+        this.documentoLegalRepository = documentoLegalRepository;
         this.systemOverviewService = systemOverviewService;
         this.apiEventoService = apiEventoService;
+        this.backendProxyService = backendProxyService;
         this.objectMapper = objectMapper;
         this.adminEmail = adminEmail;
         this.adminPassword = adminPassword;
@@ -281,6 +288,138 @@ public class ControlPlaneController {
                 "users", p.getLimiteUsuarios(), "transactionsMonth", p.getLimiteTransaccionesMes(),
                 "kycMonth", p.getLimiteKycMes(), "reportsMonth", p.getLimiteReportesMes(),
                 "rules", p.getLimiteReglas(), "precioAnual", p.getPrecioAnual(), "activo", p.getActivo());
+    }
+
+    // ─── Documentos Legales (Términos y Condiciones / Política de Privacidad) ───
+
+    @GetMapping("/api/admin/documentos-legal")
+    public ResponseEntity<List<Map<String, Object>>> listarDocumentosLegales() {
+        List<Map<String, Object>> result = documentoLegalRepository.findByActivoTrueOrderByTipoAscVersionDesc()
+                .stream().map(this::documentoLegalToMap).toList();
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/api/admin/documentos-legal/{id}")
+    public ResponseEntity<Map<String, Object>> obtenerDocumentoLegal(@PathVariable Long id) {
+        return documentoLegalRepository.findById(id)
+                .map(d -> ResponseEntity.ok((Map<String, Object>) documentoLegalToMap(d)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/api/admin/documentos-legal")
+    public ResponseEntity<Map<String, Object>> crearDocumentoLegal(@RequestBody Map<String, Object> body) {
+        String tipo = String.valueOf(body.getOrDefault("tipo", ""));
+        if (!"TERMINOS".equals(tipo) && !"POLITICA_PRIVACIDAD".equals(tipo)) {
+            return ResponseEntity.badRequest().body(Map.of("mensaje", "Tipo invalido. Use TERMINOS o POLITICA_PRIVACIDAD"));
+        }
+        Integer version = intValue(body.get("version"));
+        if (version == null || version <= 0) {
+            return ResponseEntity.badRequest().body(Map.of("mensaje", "Version debe ser un entero positivo"));
+        }
+        if (documentoLegalRepository.findByTipoOrderByVersionDesc(tipo).stream()
+                .anyMatch(d -> d.getVersion().equals(version))) {
+            return ResponseEntity.badRequest().body(Map.of("mensaje", "Ya existe una version " + version + " para el tipo " + tipo));
+        }
+        DocumentoLegal doc = new DocumentoLegal();
+        doc.setTipo(tipo);
+        doc.setVersion(version);
+        doc.setTitulo(String.valueOf(body.getOrDefault("titulo", "")));
+        doc.setContenido(String.valueOf(body.getOrDefault("contenido", "")));
+        doc.setUrlDocumento(body.get("urlDocumento") != null ? String.valueOf(body.get("urlDocumento")) : null);
+        doc.setActivo(true);
+        doc = documentoLegalRepository.save(doc);
+        return ResponseEntity.ok(documentoLegalToMap(doc));
+    }
+
+    @PutMapping("/api/admin/documentos-legal/{id}")
+    public ResponseEntity<Map<String, Object>> actualizarDocumentoLegal(@PathVariable Long id,
+                                                                        @RequestBody Map<String, Object> body) {
+        return documentoLegalRepository.findById(id).map(doc -> {
+            if (body.containsKey("titulo")) doc.setTitulo(String.valueOf(body.get("titulo")));
+            if (body.containsKey("contenido")) doc.setContenido(String.valueOf(body.get("contenido")));
+            if (body.containsKey("urlDocumento")) doc.setUrlDocumento(body.get("urlDocumento") != null ? String.valueOf(body.get("urlDocumento")) : null);
+            if (body.containsKey("activo")) doc.setActivo(Boolean.TRUE.equals(body.get("activo")));
+            doc = documentoLegalRepository.save(doc);
+            return ResponseEntity.ok(documentoLegalToMap(doc));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/api/admin/documentos-legal/{id}/publicar")
+    public ResponseEntity<Map<String, Object>> publicarDocumentoLegal(@PathVariable Long id) {
+        return documentoLegalRepository.findById(id).map(doc -> {
+            doc.setFechaPublicacion(OffsetDateTime.now());
+            doc.setActivo(true);
+            doc = documentoLegalRepository.save(doc);
+            return ResponseEntity.ok(documentoLegalToMap(doc));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/api/v1/documentos-legal/activos")
+    public ResponseEntity<List<Map<String, Object>>> documentosLegalesActivos() {
+        List<Map<String, Object>> result = documentoLegalRepository.findByActivoTrueOrderByTipoAscVersionDesc()
+                .stream().map(this::documentoLegalToMap).toList();
+        return ResponseEntity.ok(result);
+    }
+
+    // ─── Proxy a Backend Antifraude: Usuarios, Invitaciones, Solicitudes de Roles ───
+
+    @GetMapping("/api/admin/backend/usuarios")
+    public ResponseEntity<?> proxyUsuarios(@RequestParam(required = false) String empresaId,
+                                           @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String path = "/api/admin/users";
+        if (empresaId != null && !empresaId.isBlank()) {
+            path += "?empresaId=" + empresaId;
+        }
+        return ResponseEntity.ok(backendProxyService.get(path, bearer(authHeader)));
+    }
+
+    @GetMapping("/api/admin/backend/invitaciones")
+    public ResponseEntity<?> proxyInvitaciones(@RequestParam(required = false) String empresaId,
+                                               @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String path = "/api/admin/invitaciones";
+        if (empresaId != null && !empresaId.isBlank()) {
+            path += "?empresaId=" + empresaId;
+        }
+        return ResponseEntity.ok(backendProxyService.get(path, bearer(authHeader)));
+    }
+
+    @GetMapping("/api/admin/backend/solicitud-roles")
+    public ResponseEntity<?> proxySolicitudesRoles(@RequestParam(required = false) String empresaId,
+                                                   @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String path = "/api/admin-empresa/solicitud-roles";
+        if (empresaId != null && !empresaId.isBlank()) {
+            path += "?empresaId=" + empresaId;
+        }
+        return ResponseEntity.ok(backendProxyService.get(path, bearer(authHeader)));
+    }
+
+    @GetMapping("/api/admin/backend/limites")
+    public ResponseEntity<?> proxyLimites(@RequestParam String empresaId,
+                                          @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        return ResponseEntity.ok(backendProxyService.get("/api/licensing/limites?empresaId=" + empresaId, bearer(authHeader)));
+    }
+
+    private String bearer(String authHeader) {
+        if (authHeader == null || authHeader.isBlank()) {
+            return null;
+        }
+        return authHeader.regionMatches(true, 0, "Bearer ", 0, 7)
+                ? authHeader.substring(7).trim()
+                : authHeader.trim();
+    }
+
+    private Map<String, Object> documentoLegalToMap(DocumentoLegal d) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("id", d.getId());
+        map.put("tipo", d.getTipo());
+        map.put("version", d.getVersion());
+        map.put("titulo", d.getTitulo());
+        map.put("contenido", d.getContenido());
+        map.put("urlDocumento", d.getUrlDocumento());
+        map.put("activo", d.getActivo());
+        map.put("fechaCreacion", d.getFechaCreacion() != null ? d.getFechaCreacion().toString() : null);
+        map.put("fechaPublicacion", d.getFechaPublicacion() != null ? d.getFechaPublicacion().toString() : null);
+        return map;
     }
 
     private UUID parseUuid(Object value) {

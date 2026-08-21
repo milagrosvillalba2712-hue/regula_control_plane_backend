@@ -35,7 +35,8 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())
                 || path.startsWith("/actuator/health")
-                || path.equals("/api/admin/login")) {
+                || path.equals("/api/admin/login")
+                || path.equals("/api/public/stripe/webhook")) {
             chain.doFilter(request, response);
             return;
         }
