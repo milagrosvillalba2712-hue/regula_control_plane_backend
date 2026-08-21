@@ -364,35 +364,48 @@ public class ControlPlaneController {
     // ─── Proxy a Backend Antifraude: Usuarios, Invitaciones, Solicitudes de Roles ───
 
     @GetMapping("/api/admin/backend/usuarios")
-    public ResponseEntity<?> proxyUsuarios(@RequestParam(required = false) String empresaId) {
+    public ResponseEntity<?> proxyUsuarios(@RequestParam(required = false) String empresaId,
+                                           @RequestHeader(value = "Authorization", required = false) String authHeader) {
         String path = "/api/admin/users";
         if (empresaId != null && !empresaId.isBlank()) {
             path += "?empresaId=" + empresaId;
         }
-        return ResponseEntity.ok(backendProxyService.get(path, null));
+        return ResponseEntity.ok(backendProxyService.get(path, bearer(authHeader)));
     }
 
     @GetMapping("/api/admin/backend/invitaciones")
-    public ResponseEntity<?> proxyInvitaciones(@RequestParam(required = false) String empresaId) {
-        String path = "/api/licensing/invitaciones";
+    public ResponseEntity<?> proxyInvitaciones(@RequestParam(required = false) String empresaId,
+                                               @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String path = "/api/admin/invitaciones";
         if (empresaId != null && !empresaId.isBlank()) {
             path += "?empresaId=" + empresaId;
         }
-        return ResponseEntity.ok(backendProxyService.get(path, null));
+        return ResponseEntity.ok(backendProxyService.get(path, bearer(authHeader)));
     }
 
     @GetMapping("/api/admin/backend/solicitud-roles")
-    public ResponseEntity<?> proxySolicitudesRoles(@RequestParam(required = false) String empresaId) {
-        String path = "/api/licensing/solicitud-roles";
+    public ResponseEntity<?> proxySolicitudesRoles(@RequestParam(required = false) String empresaId,
+                                                   @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String path = "/api/admin-empresa/solicitud-roles";
         if (empresaId != null && !empresaId.isBlank()) {
             path += "?empresaId=" + empresaId;
         }
-        return ResponseEntity.ok(backendProxyService.get(path, null));
+        return ResponseEntity.ok(backendProxyService.get(path, bearer(authHeader)));
     }
 
     @GetMapping("/api/admin/backend/limites")
-    public ResponseEntity<?> proxyLimites(@RequestParam String empresaId) {
-        return ResponseEntity.ok(backendProxyService.get("/api/licensing/limites?empresaId=" + empresaId, null));
+    public ResponseEntity<?> proxyLimites(@RequestParam String empresaId,
+                                          @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        return ResponseEntity.ok(backendProxyService.get("/api/licensing/limites?empresaId=" + empresaId, bearer(authHeader)));
+    }
+
+    private String bearer(String authHeader) {
+        if (authHeader == null || authHeader.isBlank()) {
+            return null;
+        }
+        return authHeader.regionMatches(true, 0, "Bearer ", 0, 7)
+                ? authHeader.substring(7).trim()
+                : authHeader.trim();
     }
 
     private Map<String, Object> documentoLegalToMap(DocumentoLegal d) {
